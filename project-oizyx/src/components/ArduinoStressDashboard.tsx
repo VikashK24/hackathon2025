@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
+import io, { Socket } from 'socket.io-client';
 
 // Enhanced interface to match our accurate processor output
 interface ParsedArduinoData {
@@ -42,6 +43,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   const [connected, setConnected] = useState<boolean>(false);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [dataHistory, setDataHistory] = useState<ParsedArduinoData[]>([]);
+  const socketRef = useRef<Socket | null>(null);
 
   // Recording states
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -59,7 +61,6 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTime = useRef<number>(0);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Function to send print-hi command
   const sendPrintHiCommand = async () => {
@@ -90,7 +91,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   };
 
   // Function to check beta:alpha ratio condition
-  const checkBetaAlphaCondition = (newData: ParsedArduinoData) => {
+  const checkBetaAlphaCondition = useCallback((newData: ParsedArduinoData) => {
     if (!newData.betaAlphaRatio) return;
 
     // Add to recent data (keep last 3 seconds worth)
@@ -132,81 +133,68 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
         sendPrintHiCommand();
       }
     }
-  };
-
-  // Function to fetch data from API
-  const fetchDataFromAPI = async () => {
-    try {
-      const response = await fetch('/api/arduino-serial-stream');
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) {
-          const newData = result.data;
-          setData(newData);
-          setLastUpdate(new Date().toLocaleTimeString());
-          setDataHistory(prev => [...prev.slice(-49), newData]);
-          setConnected(true);
-
-          // Add to recording if active
-          if (isRecording) {
-            setRecordedData(prev => [...prev, newData]);
-          }
-
-          // Check beta:alpha ratio condition
-          checkBetaAlphaCondition(newData);
-        } else {
-          setConnected(false);
-        }
-      } else {
-        setConnected(false);
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setConnected(false);
-    }
-  };
+  }, [baselineData, baselineBetaAlpha, recentData, printHiTriggered]);
 
   useEffect(() => {
-    const initializeConnection = async () => {
+    const initializeSocketConnection = async () => {
       try {
         console.log('🚀 Initializing Enhanced Stress Detection Dashboard...');
-        
-        // Initialize the processor
-        await fetch('/api/arduino-serial-stream', {
-          method: 'POST'
-        });
+        await fetch('/api/arduino-serial-stream');
 
-        console.log('✅ Processor initialized, starting data polling...');
+        setTimeout(() => {
+          console.log('🔗 Connecting to precise stress detection...');
 
-        // Start polling for data every 500ms
-        pollingIntervalRef.current = setInterval(() => {
-          fetchDataFromAPI();
-        }, 500);
+          socketRef.current = io({
+            transports: ['websocket', 'polling']
+          });
 
-        // Fetch initial data
-        fetchDataFromAPI();
+          socketRef.current.on('connect', () => {
+            setConnected(true);
+            console.log('✅ Connected to enhanced Arduino stress detection');
+          });
+
+          socketRef.current.on('arduino-parsed-data', (newData: ParsedArduinoData) => {
+            console.log('📊 Received enhanced data:', newData);
+            setData(newData);
+            setLastUpdate(new Date().toLocaleTimeString());
+            setDataHistory(prev => [...prev.slice(-49), newData]);
+
+            // Add to recording if active
+            if (isRecording) {
+              setRecordedData(prev => [...prev, newData]);
+            }
+
+            // Check beta:alpha ratio condition
+            checkBetaAlphaCondition(newData);
+          });
+
+          socketRef.current.on('disconnect', () => {
+            setConnected(false);
+            console.log('❌ Disconnected from enhanced stress detection');
+          });
+
+          socketRef.current.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            setConnected(false);
+          });
+        }, 1000);
 
       } catch (error) {
-        console.error('Failed to initialize connection:', error);
+        console.error('Failed to initialize enhanced connection:', error);
       }
     };
 
-    initializeConnection();
+    initializeSocketConnection();
 
     return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
+      if (socketRef.current) {
+        socketRef.current.disconnect();
       }
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
       }
     };
-  }, []);
-
-  // Manual print hi function for testing
-  const manualPrintHi = () => {
-    sendPrintHiCommand();
-  };
+  }, [isRecording, checkBetaAlphaCondition]); // Add checkBetaAlphaCondition to dependency array
 
   // Recording functions
   const startRecording = () => {
@@ -266,6 +254,11 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
     // Reset recording data
     setRecordedData([]);
     setRecordingTime(0);
+  };
+
+  // Manual print hi function for testing
+  const manualPrintHi = () => {
+    sendPrintHiCommand();
   };
 
   const downloadRecordedData = (session: RecordedSession) => {
