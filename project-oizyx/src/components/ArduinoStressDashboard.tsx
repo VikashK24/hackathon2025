@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
 import io, { Socket } from 'socket.io-client';
+import BetaAlphaMonitor from './BetaAlphaMonitor';
 
 // Enhanced interface to match our accurate processor output
 interface ParsedArduinoData {
@@ -55,6 +56,11 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTime = useRef<number>(0);
+
+  // Function to get the latest beta/alpha ratio for BetaAlphaMonitor
+  const getSample = (): number => {
+    return data?.betaAlphaRatio || 0;
+  };
 
   useEffect(() => {
     const initializeSocketConnection = async () => {
@@ -889,6 +895,9 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* BetaAlphaMonitor for real-time ratio monitoring */}
+        <BetaAlphaMonitor getSample={getSample} />
       </div>
     </div>
   );
