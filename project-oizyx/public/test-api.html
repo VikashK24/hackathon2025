@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Print Hi API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #3b82f6;
+            background-color: #eff6ff;
+        }
+        .error {
+            border-left-color: #ef4444;
+            background-color: #fef2f2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧠 Test Print Hi API</h1>
+        <p>This page tests the new Fetch/Express API implementation that replaces WebSocket.</p>
+        
+        <button onclick="testPrintHi()">🖨️ Test Print Hi Command</button>
+        
+        <div id="result"></div>
+
+        <h2>📊 Test Data Fetching</h2>
+        <button onclick="initializeProcessor()">🚀 Initialize Processor</button>
+        <button onclick="fetchLatestData()">📈 Fetch Latest Data</button>
+        
+        <div id="dataResult"></div>
+    </div>
+
+    <script>
+        async function testPrintHi() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = '<p>🔄 Sending Print Hi command...</p>';
+            
+            try {
+                const response = await fetch('/api/print-hi', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.innerHTML = `
+                        <div class="result">
+                            <h3>✅ Success!</h3>
+                            <p><strong>Message:</strong> ${result.message}</p>
+                            <p><strong>Timestamp:</strong> ${new Date(result.timestamp).toLocaleString()}</p>
+                            <p>Check the server console for the "Hi" output!</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h3>❌ Error</h3>
+                            <p><strong>Message:</strong> ${result.message}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ Network Error</h3>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function initializeProcessor() {
+            const resultDiv = document.getElementById('dataResult');
+            resultDiv.innerHTML = '<p>🔄 Initializing processor...</p>';
+            
+            try {
+                const response = await fetch('/api/arduino-serial-stream', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    resultDiv.innerHTML = `
+                        <div class="result">
+                            <h3>✅ Processor Initialized!</h3>
+                            <p><strong>Message:</strong> ${result.message}</p>
+                            <p>Now you can fetch data!</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h3>❌ Initialization Failed</h3>
+                            <p><strong>Message:</strong> ${result.message}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ Network Error</h3>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function fetchLatestData() {
+            const resultDiv = document.getElementById('dataResult');
+            
+            try {
+                const response = await fetch('/api/arduino-serial-stream');
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    const data = result.data;
+                    resultDiv.innerHTML = `
+                        <div class="result">
+                            <h3>📊 Latest Data Retrieved!</h3>
+                            <p><strong>Beta/Alpha Ratio:</strong> ${data.betaAlphaRatio?.toFixed(2) || 'N/A'}</p>
+                            <p><strong>Stress Level:</strong> ${data.stressLevel || 'N/A'}%</p>
+                            <p><strong>Heart Rate:</strong> ${data.heartRate || 'N/A'} BPM</p>
+                            <p><strong>Signal Quality:</strong> ${data.signalQuality || 'N/A'}%</p>
+                            <p><strong>Timestamp:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+                            ${data.eegBands ? `
+                                <p><strong>EEG Bands:</strong></p>
+                                <ul>
+                                    <li>Alpha: ${(data.eegBands.alpha * 100).toFixed(1)}%</li>
+                                    <li>Beta: ${(data.eegBands.beta * 100).toFixed(1)}%</li>
+                                    <li>Delta: ${(data.eegBands.delta * 100).toFixed(1)}%</li>
+                                    <li>Theta: ${(data.eegBands.theta * 100).toFixed(1)}%</li>
+                                    <li>Gamma: ${(data.eegBands.gamma * 100).toFixed(1)}%</li>
+                                </ul>
+                            ` : ''}
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h3>⏳ No Data Available</h3>
+                            <p>Make sure the processor is initialized and generating data.</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        <h3>❌ Network Error</h3>
+                        <p><strong>Error:</strong> ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

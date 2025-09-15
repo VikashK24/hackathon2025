@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import io, { Socket } from 'socket.io-client';
 
 // Enhanced interface to match our accurate processor output
 interface ParsedArduinoData {
@@ -43,7 +42,6 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   const [connected, setConnected] = useState<boolean>(false);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [dataHistory, setDataHistory] = useState<ParsedArduinoData[]>([]);
-  const socketRef = useRef<Socket | null>(null);
 
   // Recording states
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -53,66 +51,162 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   const [showRecordedData, setShowRecordedData] = useState<boolean>(false);
   const [selectedSession, setSelectedSession] = useState<RecordedSession | null>(null);
   
+  // Beta:Alpha ratio monitoring states
+  const [baselineBetaAlpha, setBaselineBetaAlpha] = useState<number | null>(null);
+  const [baselineData, setBaselineData] = useState<ParsedArduinoData[]>([]);
+  const [recentData, setRecentData] = useState<ParsedArduinoData[]>([]);
+  const [printHiTriggered, setPrintHiTriggered] = useState<boolean>(false);
+  
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTime = useRef<number>(0);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Function to send print-hi command
+  const sendPrintHiCommand = async () => {
+    try {
+      const response = await fetch('/api/print-hi', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('🎯 Print Hi command sent successfully!');
+        setPrintHiTriggered(true);
+        
+        // Reset the flag after 3 seconds
+        setTimeout(() => {
+          setPrintHiTriggered(false);
+        }, 3000);
+      } else {
+        console.error('Failed to send Print Hi command:', result.message);
+      }
+    } catch (error) {
+      console.error('Error sending Print Hi command:', error);
+    }
+  };
+
+  // Function to check beta:alpha ratio condition
+  const checkBetaAlphaCondition = (newData: ParsedArduinoData) => {
+    if (!newData.betaAlphaRatio) return;
+
+    // Add to recent data (keep last 3 seconds worth)
+    setRecentData(prev => {
+      const updated = [...prev, newData];
+      // Assuming data comes every 500ms, keep last 6 data points for 3 seconds
+      return updated.slice(-6);
+    });
+
+    // Add to baseline data (keep first 10 seconds worth)
+    setBaselineData(prev => {
+      if (prev.length < 20) { // Assuming data comes every 500ms, 20 points = 10 seconds
+        return [...prev, newData];
+      }
+      return prev; // Keep baseline as first 10 seconds
+    });
+
+    // Calculate baseline if we have enough data
+    if (baselineData.length >= 20 && baselineBetaAlpha === null) {
+      const avgBaseline = baselineData
+        .filter(d => d.betaAlphaRatio)
+        .reduce((sum, d) => sum + d.betaAlphaRatio!, 0) / baselineData.length;
+      
+      setBaselineBetaAlpha(avgBaseline);
+      console.log('📊 Baseline beta:alpha ratio established:', avgBaseline.toFixed(2));
+    }
+
+    // Check condition if we have baseline and recent data
+    if (baselineBetaAlpha !== null && recentData.length >= 6) {
+      const recentAvg = recentData
+        .filter(d => d.betaAlphaRatio)
+        .reduce((sum, d) => sum + d.betaAlphaRatio!, 0) / recentData.length;
+
+      console.log('📈 Current 3s avg:', recentAvg.toFixed(2), 'vs Baseline:', baselineBetaAlpha.toFixed(2));
+
+      // Trigger print-hi if recent average exceeds baseline
+      if (recentAvg > baselineBetaAlpha && !printHiTriggered) {
+        console.log('🚨 Beta:Alpha ratio exceeded baseline! Triggering print-hi...');
+        sendPrintHiCommand();
+      }
+    }
+  };
+
+  // Function to fetch data from API
+  const fetchDataFromAPI = async () => {
+    try {
+      const response = await fetch('/api/arduino-serial-stream');
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.data) {
+          const newData = result.data;
+          setData(newData);
+          setLastUpdate(new Date().toLocaleTimeString());
+          setDataHistory(prev => [...prev.slice(-49), newData]);
+          setConnected(true);
+
+          // Add to recording if active
+          if (isRecording) {
+            setRecordedData(prev => [...prev, newData]);
+          }
+
+          // Check beta:alpha ratio condition
+          checkBetaAlphaCondition(newData);
+        } else {
+          setConnected(false);
+        }
+      } else {
+        setConnected(false);
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setConnected(false);
+    }
+  };
 
   useEffect(() => {
-    const initializeSocketConnection = async () => {
+    const initializeConnection = async () => {
       try {
         console.log('🚀 Initializing Enhanced Stress Detection Dashboard...');
-        await fetch('/api/arduino-serial-stream');
+        
+        // Initialize the processor
+        await fetch('/api/arduino-serial-stream', {
+          method: 'POST'
+        });
 
-        setTimeout(() => {
-          console.log('🔗 Connecting to precise stress detection...');
+        console.log('✅ Processor initialized, starting data polling...');
 
-          socketRef.current = io({
-            transports: ['websocket', 'polling']
-          });
+        // Start polling for data every 500ms
+        pollingIntervalRef.current = setInterval(() => {
+          fetchDataFromAPI();
+        }, 500);
 
-          socketRef.current.on('connect', () => {
-            setConnected(true);
-            console.log('✅ Connected to enhanced Arduino stress detection');
-          });
-
-          socketRef.current.on('arduino-parsed-data', (newData: ParsedArduinoData) => {
-            console.log('📊 Received enhanced data:', newData);
-            setData(newData);
-            setLastUpdate(new Date().toLocaleTimeString());
-            setDataHistory(prev => [...prev.slice(-49), newData]);
-
-            // Add to recording if active
-            if (isRecording) {
-              setRecordedData(prev => [...prev, newData]);
-            }
-          });
-
-          socketRef.current.on('disconnect', () => {
-            setConnected(false);
-            console.log('❌ Disconnected from enhanced stress detection');
-          });
-
-          socketRef.current.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            setConnected(false);
-          });
-        }, 1000);
+        // Fetch initial data
+        fetchDataFromAPI();
 
       } catch (error) {
-        console.error('Failed to initialize enhanced connection:', error);
+        console.error('Failed to initialize connection:', error);
       }
     };
 
-    initializeSocketConnection();
+    initializeConnection();
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
       }
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
       }
     };
-  }, [isRecording]); // Add isRecording to dependency array
+  }, []);
+
+  // Manual print hi function for testing
+  const manualPrintHi = () => {
+    sendPrintHiCommand();
+  };
 
   // Recording functions
   const startRecording = () => {
@@ -389,6 +483,18 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
 
             {/* Recording Controls */}
             <div className="flex flex-col space-y-2">
+              {/* Manual Print Hi Button */}
+              <Button
+                onClick={manualPrintHi}
+                className={`${printHiTriggered ? 'bg-green-500 animate-pulse' : 'bg-blue-500 hover:bg-blue-600'} text-white rounded-full p-4 shadow-lg`}
+                disabled={!connected}
+              >
+                <div className="flex flex-col items-center">
+                  <div className="text-2xl">👋</div>
+                  <div className="text-xs">Print Hi</div>
+                </div>
+              </Button>
+
               {!isRecording ? (
                 <Button
                   onClick={startRecording}
@@ -477,7 +583,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
             🧠 Enhanced Stress Detection Dashboard
           </h1>
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-4 flex-wrap">
             <div className="flex items-center gap-2">
               <div className={`w-4 h-4 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
               <span className="text-sm font-medium text-gray-600">
@@ -493,6 +599,19 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
                 <span className="text-xs text-gray-500">
                   Signal: {getQualityCategory(data.signalQuality)}
                 </span>
+              </div>
+            )}
+            {/* Beta:Alpha Monitoring Status */}
+            <div className="flex items-center gap-2 bg-purple-50 px-3 py-1 rounded-full">
+              <div className={`w-3 h-3 rounded-full ${printHiTriggered ? 'bg-red-500 animate-pulse' : baselineBetaAlpha !== null ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+              <span className="text-xs text-gray-600">
+                {printHiTriggered ? 'Print Hi Triggered!' : 
+                 baselineBetaAlpha !== null ? 'Beta:Alpha Monitoring Active' : 'Establishing Baseline...'}
+              </span>
+            </div>
+            {baselineBetaAlpha !== null && (
+              <div className="text-xs text-gray-500">
+                Baseline: {baselineBetaAlpha.toFixed(2)} | Current: {data?.betaAlphaRatio?.toFixed(2) || 'N/A'}
               </div>
             )}
           </div>
