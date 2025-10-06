@@ -41,7 +41,7 @@ export default function handler(
     stressProcessor = new WorkingStressProcessor(ports[0], 115200);
     
     stressProcessor.onDataReceived = (data: ParsedArduinoData) => {
-      console.log('📡 Broadcasting raw data:', data.eegBands);
+      console.log('📡 Broadcasting raw data ######:', data.eegBands);
       console.log('📡 Broadcasting working data:', {
         delta: `${(data.eegBands!.delta * 100).toFixed(1)}%`,
         alpha: `${(data.eegBands!.alpha * 100).toFixed(1)}%`,

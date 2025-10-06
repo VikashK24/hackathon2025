@@ -52,7 +52,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
   const [completedSessions, setCompletedSessions] = useState<RecordedSession[]>([]);
   const [showRecordedData, setShowRecordedData] = useState<boolean>(false);
   const [selectedSession, setSelectedSession] = useState<RecordedSession | null>(null);
-  
+
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recordingStartTime = useRef<number>(0);
 
@@ -120,20 +120,20 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
     setRecordingTime(0);
     setRecordedData([]);
     recordingStartTime.current = Date.now();
-    
+
     console.log('🔴 Started recording stress data for 10 minutes...');
-    
+
     // Timer for recording duration
     recordingIntervalRef.current = setInterval(() => {
       setRecordingTime(prevTime => {
         const newTime = prevTime + 1;
-        
+
         // Stop recording after 10 minutes (600 seconds)
         if (newTime >= 600) {
           stopRecording();
           return 600;
         }
-        
+
         return newTime;
       });
     }, 1000);
@@ -141,12 +141,12 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
 
   const stopRecording = () => {
     setIsRecording(false);
-    
+
     if (recordingIntervalRef.current) {
       clearInterval(recordingIntervalRef.current);
       recordingIntervalRef.current = null;
     }
-    
+
     // Create session record
     const session: RecordedSession = {
       sessionId: `session_${Date.now()}`,
@@ -156,30 +156,59 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
       dataPoints: [...recordedData],
       metadata: {
         totalSamples: recordedData.length,
-        averageStress: recordedData.length > 0 ? 
+        averageStress: recordedData.length > 0 ?
           Math.round(recordedData.reduce((sum, d) => sum + (d.stressLevel || 0), 0) / recordedData.length) : 0,
-        averageHeartRate: recordedData.length > 0 ? 
+        averageHeartRate: recordedData.length > 0 ?
           Math.round(recordedData.reduce((sum, d) => sum + (d.heartRate || 0), 0) / recordedData.length) : 0,
-        averageBetaAlpha: recordedData.length > 0 ? 
+        averageBetaAlpha: recordedData.length > 0 ?
           Math.round(recordedData.reduce((sum, d) => sum + (d.betaAlphaRatio || 0), 0) / recordedData.length * 100) / 100 : 0,
       }
     };
-    
+
     setCompletedSessions(prev => [...prev, session]);
-    
+
     console.log('⏹️ Recording completed!', session);
-    
+
     // Reset recording data
     setRecordedData([]);
     setRecordingTime(0);
   };
 
+  const triggeringPMR = () => {
+    try {
+      fetch('http://172.16.57.137:3000/pmr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+        .then(response => response.json())
+    } catch (error) {
+      console.log('Error in PMR:', error);
+    }
+  };
+
+  const triggerBBR = () => {
+    try {
+      fetch('http://172.16.57.137:3000/bbr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+        .then(response => response.json())
+    } catch (error) {
+      console.log('Error in BBR:', error);
+    }
+  };
+
+
   const downloadRecordedData = (session: RecordedSession) => {
     const dataStr = JSON.stringify(session, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+
     const exportFileDefaultName = `stress_session_${new Date(session.startTime).toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
-    
+
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
@@ -255,6 +284,19 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
     return Math.round(validQuality.reduce((a, b) => a + b, 0) / validQuality.length);
   };
 
+  // Calculate progress percentage (0-100%)
+  const getRecordingProgress = (): number => {
+    return Math.min((recordingTime / 600) * 100, 100);
+  };
+
+  // Get remaining time in MM:SS format
+  const getRemainingTime = (): string => {
+    const remainingSeconds = Math.max(600 - recordingTime, 0);
+    const mins = Math.floor(remainingSeconds / 60);
+    const secs = remainingSeconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   if (showRecordedData && selectedSession) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-6">
@@ -271,8 +313,8 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
               <Badge className="bg-blue-500 text-white">
                 Samples: {selectedSession.metadata.totalSamples}
               </Badge>
-              <Button 
-                onClick={() => setShowRecordedData(false)} 
+              <Button
+                onClick={() => setShowRecordedData(false)}
                 variant="outline"
                 size="sm"
               >
@@ -347,19 +389,49 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="h-64 flex items-end justify-center space-x-1 overflow-x-auto">
-                {selectedSession.dataPoints.slice(0, 100).map((point, index) => (
-                  <div
-                    key={index}
-                    className={`w-2 ${getStressColor(point.stressLevel)} rounded-t opacity-80 hover:opacity-100 transition-opacity`}
-                    style={{
-                      height: `${Math.max(8, (point.stressLevel || 0) * 2.5)}px`
-                    }}
-                    title={`Time: ${Math.round(index * selectedSession.duration * 10 / selectedSession.dataPoints.length)}min, Stress: ${point.stressLevel}%`}
-                  />
-                ))}
+                <div className="relative">
+                  {/* Chart bars */}
+                  <div className="flex items-end space-x-1 mb-4">
+                    {selectedSession.dataPoints.map((point, index) => (
+                      <div
+                        key={index}
+                        className={`w-2 ${getStressColor(point.stressLevel)} rounded-t opacity-80 hover:opacity-100 transition-opacity`}
+                        style={{
+                          height: `${Math.max(8, (point.stressLevel || 0) * 2.5)}px`
+                        }}
+                        title={`Time: ${new Date(point.timestamp).toLocaleTimeString()}, Stress: ${point.stressLevel}%`}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Time scale */}
+                  {/* <div className="relative h-6 border-t border-gray-300">
+                    {Array.from({ length: Math.min(11, selectedSession.dataPoints.length) }, (_, i) => {
+                      const timeIndex = Math.floor(i * (selectedSession.dataPoints.length - 1) / Math.max(1, Math.min(10, selectedSession.dataPoints.length - 1)));
+                      const timeValue = Math.round(timeIndex * selectedSession.duration / selectedSession.dataPoints.length);
+                      const position = (timeIndex / Math.max(1, selectedSession.dataPoints.length - 1)) * 100;
+
+                      return (
+                        <div
+                          key={i}
+                          className="absolute text-xs text-gray-600 transform -translate-x-1/2"
+                          style={{ left: `${position}%`, top: '4px' }}
+                        >
+                          {timeValue}min
+                        </div>
+                      );
+                    })}
+                  </div> */}
+
+                  {/* Axis label */}
+                  <div className="text-center text-sm text-gray-600 font-medium mt-2">
+                    Time (minutes)
+                  </div>
+                </div>
+
               </div>
               <div className="text-xs text-gray-500 mt-2 text-center">
-                Stress levels over session (first 100 data points)
+                Stress levels over session
               </div>
             </CardContent>
           </Card>
@@ -375,53 +447,116 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
         <div className="fixed bottom-8 right-8 z-50">
           <div className="flex flex-col items-end space-y-4">
             {/* Recording Status */}
-            {isRecording && (
-              <div className="bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg animate-pulse">
-                <div className="text-sm font-semibold">🔴 RECORDING</div>
-                <div className="text-lg font-bold">{formatRecordingTime(recordingTime)}</div>
-                <div className="text-xs">/ 10:00</div>
-                <Progress 
-                  value={(recordingTime / 600) * 100} 
-                  className="mt-1 h-2"
-                />
-              </div>
-            )}
+            <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 items-end">
 
-            {/* Recording Controls */}
-            <div className="flex flex-col space-y-2">
-              {!isRecording ? (
-                <Button
-                  onClick={startRecording}
-                  className="bg-red-500 hover:bg-red-600 text-white rounded-full p-4 shadow-lg"
-                  disabled={!connected}
-                >
-                  <div className="flex flex-col items-center">
-                    <div className="text-2xl">🔴</div>
-                    <div className="text-xs">Record</div>
-                  </div>
-                </Button>
-              ) : (
-                <Button
-                  onClick={stopRecording}
-                  className="bg-gray-500 hover:bg-gray-600 text-white rounded-full p-4 shadow-lg"
-                >
-                  <div className="flex flex-col items-center">
-                    <div className="text-2xl">⏹️</div>
-                    <div className="text-xs">Stop</div>
-                  </div>
-                </Button>
+              {/* Enhanced Recording Status with Timer */}
+              {isRecording && (
+                <Card className="bg-red-500/95 border-red-300 backdrop-blur-sm shadow-2xl">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3 text-white">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 bg-white rounded-full animate-ping"></div>
+                        <span className="text-sm font-bold">🔴 REC</span>
+                      </div>
+
+                      <div className="flex flex-col items-center">
+                        <div className="text-2xl font-mono font-bold">
+                          {formatRecordingTime(recordingTime)}
+                        </div>
+                        <div className="text-xs opacity-90">
+                          / 10:00 min
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-sm font-semibold">
+                          -{getRemainingTime()}
+                        </div>
+                        <div className="text-xs opacity-80">
+                          {recordedData.length} pts
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Horizontal Progress Bar */}
+                    <div className="mt-3">
+                      <div className="w-full bg-red-800 rounded-full h-2">
+                        <div
+                          className="bg-white h-2 rounded-full transition-all duration-1000"
+                          style={{ width: `${getRecordingProgress()}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1 text-xs opacity-80">
+                        <span>0:00</span>
+                        <span className="font-bold">{Math.round(getRecordingProgress())}%</span>
+                        <span>10:00</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               )}
+
+              {/* Recording Control Buttons */}
+              <div className="flex flex-col space-y-3">
+                {!isRecording ? (
+                  <Button
+                    onClick={startRecording}
+                    className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 disabled:from-gray-400 disabled:to-gray-500 text-white rounded-full p-6 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105 disabled:hover:scale-100 disabled:cursor-not-allowed border-2 border-red-400 disabled:border-gray-400"
+                    disabled={!connected}
+                    size="lg"
+                  >
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="text-3xl animate-pulse">🔴</div>
+                      <div className="text-sm font-semibold tracking-wide">RECORD</div>
+                      <div className="text-xs opacity-80 font-medium">10 min session</div>
+                    </div>
+                  </Button>
+                ) : (
+                  <div>
+                    <Button
+                      onClick={stopRecording}
+                      className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full p-6 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105 border-2 border-gray-500"
+                      size="lg"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="text-3xl">⏹️</div>
+                        <div className="text-sm font-semibold tracking-wide">STOP</div>
+                        <div className="text-xs opacity-80 font-medium">End recording</div>
+                      </div>
+                    </Button>
+                    <Button
+                      onClick={triggeringPMR}
+                      className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full p-6 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105 border-2 border-gray-500"
+                      size="lg"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="text-3xl">⏹️</div>
+                        <div className="text-sm font-semibold tracking-wide">PMR</div>
+                        {/* <div className="text-xs opacity-80 font-medium">End recording</div> */}
+                      </div>
+                    </Button>
+                    <Button
+                      onClick={triggerBBR}
+                      className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full p-6 shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105 border-2 border-gray-500"
+                      size="lg"
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="text-3xl">⏹️</div>
+                        <div className="text-sm font-semibold tracking-wide">BBR</div>
+                        {/* <div className="text-xs opacity-80 font-medium">End recording</div> */}
+                      </div>
+                    </Button>
+                  </div>
+                )}
+              </div>
 
               {/* Sessions Button */}
               {completedSessions.length > 0 && (
                 <Button
                   onClick={() => setShowRecordedData(true)}
-                  className="bg-purple-500 hover:bg-purple-600 text-white rounded-full p-4 shadow-lg"
+                  className="bg-purple-500 hover:bg-purple-600 text-white rounded-full p-4 shadow-lg relative"
                 >
-                  <div className="flex flex-col items-center">
-                    <div className="text-2xl">📊</div>
-                    <div className="text-xs">{completedSessions.length}</div>
-                  </div>
+                  📁 {completedSessions.length}
                 </Button>
               )}
             </div>
@@ -504,7 +639,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
             {/* Main Metrics - Enhanced */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
               {/* Existing metric cards... */}
-              
+
               {/* Stress Level */}
               <Card className="shadow-lg">
                 <CardHeader className="pb-2">
@@ -678,7 +813,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="relative h-80 flex flex-col items-center justify-center bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg p-6">
-                    
+
                     {/* Beta (Upward from center) */}
                     <div className="flex flex-col items-center w-full">
                       <div className="text-xs font-semibold text-blue-600 mb-1">BETA ACTIVITY</div>
@@ -687,10 +822,10 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
                         <div className="text-lg font-bold text-blue-600 mb-2">
                           {(data.eegBands.beta * 100).toFixed(1)}%
                         </div>
-                        
+
                         {/* Beta bar extending upward */}
                         <div className="w-12 bg-gray-200 rounded-t-lg relative overflow-hidden">
-                          <div 
+                          <div
                             className="w-full bg-gradient-to-t from-blue-400 to-blue-600 transition-all duration-1000 ease-out absolute bottom-0"
                             style={{
                               height: `${Math.max(8, data.eegBands.beta * 120)}px`
@@ -716,14 +851,14 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
                       <div className="relative w-32 flex flex-col items-center">
                         {/* Alpha bar extending downward */}
                         <div className="w-12 bg-gray-200 rounded-b-lg relative overflow-hidden">
-                          <div 
+                          <div
                             className="w-full bg-gradient-to-b from-red-400 to-red-600 transition-all duration-1000 ease-out absolute top-0"
                             style={{
                               height: `${Math.max(8, data.eegBands.alpha * 120)}px`
                             }}
                           />
                         </div>
-                        
+
                         {/* Alpha percentage display */}
                         <div className="text-lg font-bold text-red-600 mt-2">
                           {(data.eegBands.alpha * 100).toFixed(1)}%
@@ -734,18 +869,17 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
 
                     {/* Status indicator */}
                     <div className="absolute top-4 right-4">
-                      <Badge className={`${
-                        data.betaAlphaRatio && data.betaAlphaRatio > 2.0 ? 'bg-red-500' : 
+                      <Badge className={`${data.betaAlphaRatio && data.betaAlphaRatio > 2.0 ? 'bg-red-500' :
                         data.betaAlphaRatio && data.betaAlphaRatio > 1.5 ? 'bg-orange-500' :
-                        data.betaAlphaRatio && data.betaAlphaRatio > 1.0 ? 'bg-yellow-500' : 'bg-green-500'
-                      } text-white text-xs`}>
-                        {data.betaAlphaRatio && data.betaAlphaRatio > 2.0 ? 'HIGH STRESS' : 
-                         data.betaAlphaRatio && data.betaAlphaRatio > 1.5 ? 'MODERATE' :
-                         data.betaAlphaRatio && data.betaAlphaRatio > 1.0 ? 'MILD' : 'RELAXED'}
+                          data.betaAlphaRatio && data.betaAlphaRatio > 1.0 ? 'bg-yellow-500' : 'bg-green-500'
+                        } text-white text-xs`}>
+                        {data.betaAlphaRatio && data.betaAlphaRatio > 2.0 ? 'HIGH STRESS' :
+                          data.betaAlphaRatio && data.betaAlphaRatio > 1.5 ? 'MODERATE' :
+                            data.betaAlphaRatio && data.betaAlphaRatio > 1.0 ? 'MILD' : 'RELAXED'}
                       </Badge>
                     </div>
                   </div>
-                  
+
                   {/* Legend */}
                   <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
                     <div className="flex items-center">
@@ -864,8 +998,8 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="text-gray-500 mt-4 pt-2 border-t border-gray-700">
-                    timestamp: {new Date(data.timestamp).toLocaleString()} | 
-                    quality: {getQualityCategory(data.signalQuality)} | 
+                    timestamp: {new Date(data.timestamp).toLocaleString()} |
+                    quality: {getQualityCategory(data.signalQuality)} |
                     status: {getStressCategory(data.stressLevel)} stress
                     {isRecording && <span className="text-red-400 ml-4">🔴 RECORDING</span>}
                   </div>
@@ -882,7 +1016,7 @@ const EnhancedArduinoStressDashboard: React.FC = () => {
               <div className="text-xs text-gray-400 mt-4">
                 <div>Expected JSON format:</div>
                 <div className="font-mono bg-gray-100 p-2 mt-2 rounded text-left inline-block">
-                  {`{"timestamp": 12345, "samples": 10, "sampleRate": 250,`}<br/>
+                  {`{"timestamp": 12345, "samples": 10, "sampleRate": 250,`}<br />
                   {` "eeg": [512, 515, 510, ...], "ecg": [600, 605, ...]}`}
                 </div>
               </div>
